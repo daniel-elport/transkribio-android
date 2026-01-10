@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Large model files (download separately)
+app/src/main/assets/*.onnx
+app/src/main/assets/*.txt
+
+# AAR libraries
+app/libs/*.aar

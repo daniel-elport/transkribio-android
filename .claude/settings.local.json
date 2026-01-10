@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:k2-fsa.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:central.sonatype.com)",
+      "Bash(curl:*)",
+      "Bash(tar:*)",
+      "Bash(dir \"C:\\\\Users\\\\danel\\\\AndroidStudioProjects\\\\Transkribio2\\\\sherpa-onnx-whisper-tiny\")",
+      "Bash(./gradlew assembleDebug:*)",
+      "Bash(cmd //c \"gradlew.bat assembleDebug\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\danel\\\\AndroidStudioProjects\\\\Transkribio2 && gradlew.bat assembleDebug 2>&1\")"
+    ]
+  }
+}
