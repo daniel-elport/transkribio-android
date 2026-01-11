@@ -180,11 +180,29 @@ object SherpaRecognizer {
             val result = r.getResult(stream)
             stream.release()
 
-            val text = result.text.trim()
-            if (text.isNotEmpty()) {
-                Log.d(TAG, "Transcribed: $text")
+            val rawText = result.text.trim()
+            if (rawText.isEmpty()) return ""
+
+            // Check if post-processing is enabled
+            val postProcessingEnabled = TranskribioApp.instance.settingsManager.postProcessingEnabled.value
+
+            if (postProcessingEnabled) {
+                // Check if it's likely noise/false positive
+                if (GermanTextProcessor.isNoise(rawText)) {
+                    Log.d(TAG, "Filtered noise: $rawText")
+                    return ""
+                }
+
+                // Apply German text post-processing
+                val processedText = GermanTextProcessor.processSegment(rawText)
+                if (processedText.isNotEmpty()) {
+                    Log.d(TAG, "Transcribed: $rawText -> $processedText")
+                }
+                return processedText
+            } else {
+                Log.d(TAG, "Transcribed (raw): $rawText")
+                return rawText
             }
-            return text
         }
     }
 

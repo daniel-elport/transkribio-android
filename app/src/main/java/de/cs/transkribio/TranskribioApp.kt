@@ -8,6 +8,7 @@ class TranskribioApp : Application() {
 
     val database by lazy { RecordingsDatabase.getDatabase(this) }
     val repository by lazy { RecordingsRepository(database.recordingDao()) }
+    val settingsManager by lazy { SettingsManager.getInstance(this) }
 
     override fun onCreate() {
         super.onCreate()

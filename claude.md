@@ -114,14 +114,15 @@ Loop:
 
 ## 🧠 Whisper Model
 
-- Model: Whisper Tiny
+- Model: Whisper Small (INT8 quantized)
 - Language: German
 - Task: Transcription
 
 Assets:
-- encoder.onnx
-- decoder.onnx
-- tokens.txt
+- small-encoder.int8.onnx
+- small-decoder.int8.onnx
+- small-tokens.txt
+- silero_vad.onnx
 
 No runtime downloads.
 
@@ -186,7 +187,14 @@ Components:
 
 ---
 
+## 🔨 Development Workflow
+
+**Build & Install**: User handles build and install in Android Studio (not Claude).
+Claude should make code changes only; do not run gradle build or adb install commands.
+
+---
+
 ## ✅ Final Instruction
 
-Build **exactly** according to this spec.  
+Build **exactly** according to this spec.
 Favor stability, UX, and clarity over features.

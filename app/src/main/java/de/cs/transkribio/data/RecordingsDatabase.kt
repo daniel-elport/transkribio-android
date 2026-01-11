@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 
-@Database(entities = [Recording::class], version = 1, exportSchema = false)
+@Database(entities = [Recording::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class RecordingsDatabase : RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
@@ -21,7 +21,7 @@ abstract class RecordingsDatabase : RoomDatabase() {
                     context.applicationContext,
                     RecordingsDatabase::class.java,
                     "recordings_database"
-                ).build()
+                ).fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }

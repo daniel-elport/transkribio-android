@@ -17,15 +17,11 @@ data class Recording(
     val updatedAt: Long = System.currentTimeMillis(),
     val durationMs: Long = 0,
     val segments: List<RecordingSegment> = emptyList(),
-    val speakerCount: Int = 0,
     val isComplete: Boolean = false
 )
 
 data class RecordingSegment(
     val text: String,
-    val speakerId: Int = -1,
-    val startTimeSec: Float = 0f,
-    val endTimeSec: Float = 0f,
     val timestamp: Long = System.currentTimeMillis()
 )
 

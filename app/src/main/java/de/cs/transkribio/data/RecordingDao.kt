@@ -28,7 +28,4 @@ interface RecordingDao {
 
     @Query("UPDATE recordings SET name = :name, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateName(id: Long, name: String, updatedAt: Long = System.currentTimeMillis())
-
-    @Query("UPDATE recordings SET segments = :segments, speakerCount = :speakerCount, updatedAt = :updatedAt WHERE id = :id")
-    suspend fun updateSegments(id: Long, segments: String, speakerCount: Int, updatedAt: Long = System.currentTimeMillis())
 }

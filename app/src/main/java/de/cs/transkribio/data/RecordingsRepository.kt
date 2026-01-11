@@ -33,11 +33,4 @@ class RecordingsRepository(private val recordingDao: RecordingDao) {
     suspend fun updateName(id: Long, name: String) {
         recordingDao.updateName(id, name)
     }
-
-    suspend fun appendSegments(id: Long, newSegments: List<RecordingSegment>, speakerCount: Int) {
-        val recording = recordingDao.getRecordingById(id) ?: return
-        val updatedSegments = recording.segments + newSegments
-        val converter = Converters()
-        recordingDao.updateSegments(id, converter.fromSegmentList(updatedSegments), speakerCount)
-    }
 }

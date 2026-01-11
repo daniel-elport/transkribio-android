@@ -27,6 +27,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import de.cs.transkribio.ui.RecordingDetailScreen
 import de.cs.transkribio.ui.RecordingsListScreen
+import de.cs.transkribio.ui.SettingsScreen
 import de.cs.transkribio.ui.theme.TranskribioTheme
 
 sealed class Screen(val route: String) {
@@ -35,6 +36,7 @@ sealed class Screen(val route: String) {
         fun createRoute(recordingId: Long) = "recording_detail/$recordingId"
     }
     object NewRecording : Screen("new_recording")
+    object Settings : Screen("settings")
 }
 
 class MainActivity : ComponentActivity() {
@@ -74,16 +76,22 @@ class MainActivity : ComponentActivity() {
                                 viewModel = recordingsViewModel,
                                 onNewRecording = {
                                     transcriptionViewModel.clearTranscription()
-                                    transcriptionViewModel.startNewRecording()
                                     navController.navigate(Screen.NewRecording.route)
                                 },
                                 onOpenRecording = { recordingId ->
                                     transcriptionViewModel.loadRecording(recordingId)
                                     navController.navigate(Screen.RecordingDetail.createRoute(recordingId))
                                 },
-                                onResumeRecording = { recordingId ->
-                                    transcriptionViewModel.resumeRecording(recordingId)
-                                    navController.navigate(Screen.RecordingDetail.createRoute(recordingId))
+                                onOpenSettings = {
+                                    navController.navigate(Screen.Settings.route)
+                                }
+                            )
+                        }
+
+                        composable(Screen.Settings.route) {
+                            SettingsScreen(
+                                onNavigateBack = {
+                                    navController.popBackStack()
                                 }
                             )
                         }
@@ -93,15 +101,11 @@ class MainActivity : ComponentActivity() {
                             arguments = listOf(
                                 navArgument("recordingId") { type = NavType.LongType }
                             )
-                        ) { backStackEntry ->
-                            val recordingId = backStackEntry.arguments?.getLong("recordingId") ?: 0L
+                        ) {
                             RecordingDetailScreen(
                                 viewModel = transcriptionViewModel,
                                 onNavigateBack = {
                                     navController.popBackStack()
-                                },
-                                onResumeRecording = {
-                                    transcriptionViewModel.resumeRecording(recordingId)
                                 }
                             )
                         }
@@ -111,9 +115,6 @@ class MainActivity : ComponentActivity() {
                                 viewModel = transcriptionViewModel,
                                 onNavigateBack = {
                                     navController.popBackStack()
-                                },
-                                onResumeRecording = {
-                                    // Already recording or just created
                                 }
                             )
                         }

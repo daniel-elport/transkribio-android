@@ -58,19 +58,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.cs.transkribio.TranscriptionSegment
-import de.cs.transkribio.TranscriptionState
 import de.cs.transkribio.TranscriptionViewModel
 import kotlinx.coroutines.delay
-
-// Speaker colors
-private val SpeakerColors = listOf(
-    Color(0xFF2196F3),  // Blue
-    Color(0xFF4CAF50),  // Green
-    Color(0xFFFF9800),  // Orange
-    Color(0xFF9C27B0),  // Purple
-    Color(0xFFE91E63),  // Pink
-    Color(0xFF00BCD4),  // Cyan
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,20 +92,11 @@ fun TranscriptionScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = "Transkribio",
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 2.sp
-                        )
-                        if (uiState.speakerCount > 0) {
-                            Text(
-                                text = "${uiState.speakerCount} speaker${if (uiState.speakerCount > 1) "s" else ""} detected",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    Text(
+                        text = "Transkribio",
+                        fontWeight = FontWeight.Light,
+                        letterSpacing = 2.sp
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -156,7 +136,6 @@ fun TranscriptionScreen(
                     partialText = uiState.partialText,
                     isRecording = uiState.isRecording,
                     isProcessing = uiState.isProcessing,
-                    isDiarizing = uiState.isDiarizing,
                     waveformAmplitudes = uiState.waveformAmplitudes,
                     listState = listState,
                     modifier = Modifier.weight(1f)
@@ -196,7 +175,6 @@ private fun TranscriptionContent(
     partialText: String,
     isRecording: Boolean,
     isProcessing: Boolean,
-    isDiarizing: Boolean,
     waveformAmplitudes: List<Float>,
     listState: androidx.compose.foundation.lazy.LazyListState,
     modifier: Modifier = Modifier
@@ -204,7 +182,7 @@ private fun TranscriptionContent(
     Box(modifier = modifier.fillMaxSize()) {
         if (transcriptionHistory.isEmpty() && partialText.isEmpty()) {
             // Empty state
-            EmptyState(isRecording = isRecording, isDiarizing = isDiarizing)
+            EmptyState(isRecording = isRecording)
         } else {
             LazyColumn(
                 state = listState,
@@ -220,7 +198,6 @@ private fun TranscriptionContent(
                 ) { index, segment ->
                     AnimatedTranscriptionItem(
                         text = segment.text,
-                        speakerId = segment.speakerId,
                         isNew = index == transcriptionHistory.size - 1
                     )
                 }
@@ -259,20 +236,11 @@ private fun TranscriptionContent(
                 RecordingIndicator(isProcessing = isProcessing)
             }
         }
-
-        // Diarization indicator
-        if (isDiarizing) {
-            DiarizationIndicator(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 100.dp)
-            )
-        }
     }
 }
 
 @Composable
-private fun EmptyState(isRecording: Boolean, isDiarizing: Boolean = false) {
+private fun EmptyState(isRecording: Boolean) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -282,11 +250,7 @@ private fun EmptyState(isRecording: Boolean, isDiarizing: Boolean = false) {
             modifier = Modifier.padding(32.dp)
         ) {
             Text(
-                text = when {
-                    isDiarizing -> "Identifying speakers..."
-                    isRecording -> "Listening..."
-                    else -> "Tap the microphone to start"
-                },
+                text = if (isRecording) "Listening..." else "Tap the microphone to start",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -306,7 +270,6 @@ private fun EmptyState(isRecording: Boolean, isDiarizing: Boolean = false) {
 @Composable
 private fun AnimatedTranscriptionItem(
     text: String,
-    speakerId: Int = -1,
     isPartial: Boolean = false,
     isNew: Boolean = false
 ) {
@@ -319,12 +282,6 @@ private fun AnimatedTranscriptionItem(
         }
     }
 
-    val speakerColor = if (speakerId >= 0) {
-        SpeakerColors[speakerId % SpeakerColors.size]
-    } else {
-        null
-    }
-
     AnimatedVisibility(
         visible = isVisible,
         enter = fadeIn(animationSpec = tween(300)) +
@@ -333,45 +290,19 @@ private fun AnimatedTranscriptionItem(
                     initialOffsetY = { it / 2 }
                 )
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top
-        ) {
-            // Speaker indicator
-            if (speakerColor != null) {
-                Box(
-                    modifier = Modifier
-                        .padding(end = 12.dp, top = 6.dp)
-                        .size(8.dp)
-                        .background(speakerColor, CircleShape)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                // Speaker label
-                if (speakerId >= 0) {
-                    Text(
-                        text = "Speaker ${speakerId + 1}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = speakerColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 2.dp)
-                    )
-                }
-
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 20.sp,
-                        lineHeight = 28.sp
-                    ),
-                    color = if (isPartial) {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                )
-            }
-        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                fontSize = 20.sp,
+                lineHeight = 28.sp
+            ),
+            color = if (isPartial) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -469,46 +400,5 @@ private fun RecordButton(
                 tint = MaterialTheme.colorScheme.onPrimary
             )
         }
-    }
-}
-
-@Composable
-private fun DiarizationIndicator(
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "diarize")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        // Animated speaker icons
-        SpeakerColors.take(3).forEachIndexed { index, color ->
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 2.dp)
-                    .size(10.dp)
-                    .background(
-                        color = color.copy(alpha = if (index == 0) alpha else if (index == 1) 1f - alpha + 0.4f else alpha),
-                        shape = CircleShape
-                    )
-            )
-        }
-        Spacer(modifier = Modifier.size(12.dp))
-        Text(
-            text = "Identifying speakers...",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-        )
     }
 }

@@ -23,23 +23,19 @@ import kotlinx.coroutines.withContext
 
 data class TranscriptionSegment(
     val text: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val speakerId: Int = -1,
-    val startTimeSec: Float = 0f,
-    val endTimeSec: Float = 0f
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class TranscriptionState(
     val isRecording: Boolean = false,
+    val isStartingRecording: Boolean = false,
     val isInitializing: Boolean = false,
     val isProcessing: Boolean = false,
-    val isDiarizing: Boolean = false,
     val partialText: String = "",
     val transcriptionHistory: List<TranscriptionSegment> = emptyList(),
     val error: String? = null,
     val audioAmplitude: Float = 0f,
     val waveformAmplitudes: List<Float> = List(32) { 0f },
-    val speakerCount: Int = 0,
     val currentRecordingId: Long? = null,
     val currentRecordingName: String = "",
     val recordingDurationMs: Long = 0
@@ -64,11 +60,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
     private var recordingJob: Job? = null
     private var processingJob: Job? = null
 
-    // Audio buffer for speaker diarization
-    private val recordedSamples = mutableListOf<FloatArray>()
-    private var recordingStartTime: Long = 0L
-    private var currentSampleCount: Int = 0
-
     init {
         initializeRecognizer()
     }
@@ -79,12 +70,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
             try {
                 withContext(Dispatchers.IO) {
                     SherpaRecognizer.init(getApplication())
-                    try {
-                        SpeakerDiarizer.init(getApplication())
-                        Log.d(TAG, "Speaker diarizer initialized")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Speaker diarization unavailable: ${e.message}")
-                    }
                 }
                 _uiState.update { it.copy(isInitializing = false) }
                 Log.d(TAG, "Recognizer initialized")
@@ -108,7 +93,7 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                 "Transkribio::RecordingWakeLock"
             )
         }
-        wakeLock?.acquire(60 * 60 * 1000L) // 1 hour max
+        wakeLock?.acquire(2 * 60 * 60 * 1000L) // 2 hours max
         Log.d(TAG, "WakeLock acquired")
     }
 
@@ -130,12 +115,13 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun startNewRecording(name: String? = null) {
-        if (_uiState.value.isInitializing || _uiState.value.isRecording) {
+        if (_uiState.value.isInitializing || _uiState.value.isRecording || _uiState.value.isStartingRecording) {
             return
         }
 
+        _uiState.update { it.copy(isStartingRecording = true) }
+
         viewModelScope.launch {
-            // Create new recording in database
             val recordingName = name ?: "Recording ${System.currentTimeMillis()}"
             val recording = Recording(
                 name = recordingName,
@@ -149,7 +135,7 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                     currentRecordingId = recordingId,
                     currentRecordingName = recordingName,
                     transcriptionHistory = emptyList(),
-                    speakerCount = 0
+                    recordingDurationMs = 0
                 )
             }
 
@@ -158,21 +144,23 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun resumeRecording(recordingId: Long) {
-        if (_uiState.value.isInitializing || _uiState.value.isRecording) {
+        if (_uiState.value.isInitializing || _uiState.value.isRecording || _uiState.value.isStartingRecording) {
             return
         }
 
-        viewModelScope.launch {
-            val recording = repository.getRecordingById(recordingId) ?: return@launch
+        _uiState.update { it.copy(isStartingRecording = true) }
 
-            // Convert stored segments to TranscriptionSegments
+        viewModelScope.launch {
+            val recording = repository.getRecordingById(recordingId)
+            if (recording == null) {
+                _uiState.update { it.copy(isStartingRecording = false) }
+                return@launch
+            }
+
             val existingSegments = recording.segments.map { segment ->
                 TranscriptionSegment(
                     text = segment.text,
-                    timestamp = segment.timestamp,
-                    speakerId = segment.speakerId,
-                    startTimeSec = segment.startTimeSec,
-                    endTimeSec = segment.endTimeSec
+                    timestamp = segment.timestamp
                 )
             }
 
@@ -181,7 +169,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                     currentRecordingId = recordingId,
                     currentRecordingName = recording.name,
                     transcriptionHistory = existingSegments,
-                    speakerCount = recording.speakerCount,
                     recordingDurationMs = recording.durationMs
                 )
             }
@@ -196,22 +183,15 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
             return
         }
 
-        // Acquire wake lock to keep device awake
         acquireWakeLock()
-
         SherpaRecognizer.reset()
 
-        // Clear audio buffer for new recording session
-        recordedSamples.clear()
-        recordingStartTime = System.currentTimeMillis()
-        currentSampleCount = 0
-
-        // Create buffered channel for audio samples
         audioChannel = Channel(capacity = Channel.BUFFERED)
 
         _uiState.update {
             it.copy(
                 isRecording = true,
+                isStartingRecording = false,
                 partialText = "",
                 error = null,
                 audioAmplitude = 0f,
@@ -219,7 +199,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
             )
         }
 
-        // Start audio capture coroutine
         recordingJob = viewModelScope.launch(Dispatchers.IO) {
             audioRecorder.start()
                 .catch { e ->
@@ -227,12 +206,12 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                     _uiState.update {
                         it.copy(
                             isRecording = false,
+                            isStartingRecording = false,
                             error = "Recording error: ${e.message}"
                         )
                     }
                 }
                 .collect { audioData ->
-                    // Update waveform
                     _uiState.update {
                         it.copy(
                             audioAmplitude = audioData.amplitude,
@@ -242,16 +221,10 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                         )
                     }
 
-                    // Store samples for speaker diarization
-                    recordedSamples.add(audioData.samples.copyOf())
-                    currentSampleCount += audioData.samples.size
-
-                    // Send samples to processing channel
                     audioChannel?.trySend(audioData.samples)
                 }
         }
 
-        // Start processing coroutine
         processingJob = viewModelScope.launch(Dispatchers.Default) {
             audioChannel?.consumeEach { samples ->
                 processAudioAsync(samples)
@@ -285,26 +258,37 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
     }
 
     fun stopRecording() {
-        // Release wake lock
+        if (!_uiState.value.isRecording) return
+
         releaseWakeLock()
 
-        // Stop audio capture
+        // Stop audio capture first
         recordingJob?.cancel()
         recordingJob = null
         audioRecorder.stop()
 
-        // Close channel
+        // Update UI immediately to show we're stopping
+        _uiState.update {
+            it.copy(
+                isRecording = false,
+                isProcessing = true,
+                audioAmplitude = 0f,
+                waveformAmplitudes = List(32) { 0f }
+            )
+        }
+
+        // Close channel - this signals processingJob to finish its current work
         audioChannel?.close()
         audioChannel = null
 
-        // Cancel processing
-        processingJob?.cancel()
-        processingJob = null
-
+        // Don't cancel processingJob - let it finish processing remaining audio
+        // Start a new job to wait for processing and finalize
         viewModelScope.launch {
-            _uiState.update { it.copy(isProcessing = true) }
+            // Wait for processing job to complete naturally
+            processingJob?.join()
+            processingJob = null
 
-            // Flush remaining audio
+            // Flush any remaining audio in the recognizer
             withContext(Dispatchers.Default) {
                 val finalResult = SherpaRecognizer.flush()
                 if (finalResult != null) {
@@ -317,86 +301,8 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                 }
             }
 
-            _uiState.update {
-                it.copy(
-                    isRecording = false,
-                    isProcessing = false,
-                    audioAmplitude = 0f,
-                    waveformAmplitudes = List(32) { 0f }
-                )
-            }
-
-            // Run speaker diarization
-            if (SpeakerDiarizer.isReady() && recordedSamples.isNotEmpty()) {
-                runSpeakerDiarization()
-            }
-
-            // Save recording to database
+            _uiState.update { it.copy(isProcessing = false) }
             saveCurrentRecording()
-        }
-    }
-
-    private suspend fun runSpeakerDiarization() {
-        _uiState.update { it.copy(isDiarizing = true) }
-
-        try {
-            val totalSamples = FloatArray(currentSampleCount)
-            var offset = 0
-            for (chunk in recordedSamples) {
-                chunk.copyInto(totalSamples, offset)
-                offset += chunk.size
-            }
-
-            Log.d(TAG, "Running diarization on ${totalSamples.size} samples")
-
-            val diarizedSegments = SpeakerDiarizer.process(totalSamples)
-
-            if (diarizedSegments.isNotEmpty()) {
-                val updatedHistory = matchSpeakersToTranscription(diarizedSegments)
-                val speakerCount = diarizedSegments.map { it.speakerId }.distinct().size
-
-                _uiState.update { state ->
-                    state.copy(
-                        transcriptionHistory = updatedHistory,
-                        speakerCount = speakerCount
-                    )
-                }
-
-                Log.d(TAG, "Diarization complete: $speakerCount speakers")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Diarization failed", e)
-        } finally {
-            _uiState.update { it.copy(isDiarizing = false) }
-            recordedSamples.clear()
-        }
-    }
-
-    private fun matchSpeakersToTranscription(
-        diarizedSegments: List<DiarizedSegment>
-    ): List<TranscriptionSegment> {
-        val history = _uiState.value.transcriptionHistory
-        if (history.isEmpty() || diarizedSegments.isEmpty()) return history
-
-        val totalDuration = currentSampleCount / 16000f
-
-        return history.mapIndexed { index, segment ->
-            val estimatedTime = (index.toFloat() / history.size) * totalDuration
-
-            val matchingDiarization = diarizedSegments.find { diar ->
-                estimatedTime >= diar.startTime && estimatedTime <= diar.endTime
-            } ?: diarizedSegments.minByOrNull { diar ->
-                minOf(
-                    kotlin.math.abs(diar.startTime - estimatedTime),
-                    kotlin.math.abs(diar.endTime - estimatedTime)
-                )
-            }
-
-            segment.copy(
-                speakerId = matchingDiarization?.speakerId ?: -1,
-                startTimeSec = matchingDiarization?.startTime ?: 0f,
-                endTimeSec = matchingDiarization?.endTime ?: 0f
-            )
         }
     }
 
@@ -407,9 +313,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
         val segments = state.transcriptionHistory.map { segment ->
             RecordingSegment(
                 text = segment.text,
-                speakerId = segment.speakerId,
-                startTimeSec = segment.startTimeSec,
-                endTimeSec = segment.endTimeSec,
                 timestamp = segment.timestamp
             )
         }
@@ -420,12 +323,21 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
             updatedAt = System.currentTimeMillis(),
             durationMs = state.recordingDurationMs,
             segments = segments,
-            speakerCount = state.speakerCount,
             isComplete = true
         )
 
         repository.update(recording)
         Log.d(TAG, "Recording saved: ${recording.name}")
+    }
+
+    fun resumeCurrentRecording() {
+        val recordingId = _uiState.value.currentRecordingId
+        if (recordingId != null) {
+            resumeRecording(recordingId)
+        } else {
+            // No current recording, start a new one
+            startNewRecording()
+        }
     }
 
     fun updateRecordingName(name: String) {
@@ -444,8 +356,7 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                 partialText = "",
                 currentRecordingId = null,
                 currentRecordingName = "",
-                recordingDurationMs = 0,
-                speakerCount = 0
+                recordingDurationMs = 0
             )
         }
     }
@@ -461,10 +372,7 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
             val segments = recording.segments.map { segment ->
                 TranscriptionSegment(
                     text = segment.text,
-                    timestamp = segment.timestamp,
-                    speakerId = segment.speakerId,
-                    startTimeSec = segment.startTimeSec,
-                    endTimeSec = segment.endTimeSec
+                    timestamp = segment.timestamp
                 )
             }
 
@@ -473,7 +381,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
                     currentRecordingId = recordingId,
                     currentRecordingName = recording.name,
                     transcriptionHistory = segments,
-                    speakerCount = recording.speakerCount,
                     recordingDurationMs = recording.durationMs
                 )
             }
@@ -487,8 +394,6 @@ class TranscriptionViewModel(application: Application) : AndroidViewModel(applic
         processingJob?.cancel()
         audioChannel?.close()
         audioRecorder.stop()
-        recordedSamples.clear()
         SherpaRecognizer.release()
-        SpeakerDiarizer.release()
     }
 }

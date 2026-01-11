@@ -33,7 +33,7 @@ fun RecordingsListScreen(
     viewModel: RecordingsViewModel,
     onNewRecording: () -> Unit,
     onOpenRecording: (Long) -> Unit,
-    onResumeRecording: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val recordings by viewModel.recordings.collectAsState()
@@ -50,6 +50,14 @@ fun RecordingsListScreen(
                         letterSpacing = 2.sp
                     )
                 },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Settings"
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -58,12 +66,14 @@ fun RecordingsListScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onNewRecording,
+                modifier = Modifier.size(72.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
                 shape = CircleShape
             ) {
                 Icon(
-                    imageVector = Icons.Default.Mic,
+                    imageVector = Icons.Default.Add,
                     contentDescription = "New Recording",
+                    modifier = Modifier.size(32.dp),
                     tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
@@ -90,7 +100,6 @@ fun RecordingsListScreen(
                     RecordingCard(
                         recording = recording,
                         onClick = { onOpenRecording(recording.id) },
-                        onResume = { onResumeRecording(recording.id) },
                         onDelete = { viewModel.showDeleteConfirmation(recording) }
                     )
                 }
@@ -158,7 +167,6 @@ private fun EmptyRecordingsState(modifier: Modifier = Modifier) {
 private fun RecordingCard(
     recording: Recording,
     onClick: () -> Unit,
-    onResume: () -> Unit,
     onDelete: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -230,15 +238,6 @@ private fun RecordingCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-
-                    // Speaker count
-                    if (recording.speakerCount > 0) {
-                        Text(
-                            text = "${recording.speakerCount} speaker${if (recording.speakerCount > 1) "s" else ""}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -264,16 +263,6 @@ private fun RecordingCard(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Resume Recording") },
-                        onClick = {
-                            showMenu = false
-                            onResume()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        }
-                    )
                     DropdownMenuItem(
                         text = { Text("Delete") },
                         onClick = {

@@ -1,8 +1,8 @@
 package de.cs.transkribio.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,38 +13,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import de.cs.transkribio.TranscriptionState
 import de.cs.transkribio.TranscriptionViewModel
-import java.text.SimpleDateFormat
-import java.util.*
-
-private val SpeakerColors = listOf(
-    Color(0xFF2196F3),
-    Color(0xFF4CAF50),
-    Color(0xFFFF9800),
-    Color(0xFF9C27B0),
-    Color(0xFFE91E63),
-    Color(0xFF00BCD4),
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordingDetailScreen(
     viewModel: TranscriptionViewModel,
     onNavigateBack: () -> Unit,
-    onResumeRecording: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -53,12 +41,16 @@ fun RecordingDetailScreen(
     var isEditingName by remember { mutableStateOf(false) }
     var editedName by remember(uiState.currentRecordingName) { mutableStateOf(uiState.currentRecordingName) }
 
-    // Auto-scroll when recording
-    LaunchedEffect(uiState.transcriptionHistory.size) {
-        if (uiState.transcriptionHistory.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.transcriptionHistory.size - 1)
+    // Handle back navigation - stop recording if active
+    val handleBack = {
+        if (uiState.isRecording) {
+            viewModel.stopRecording()
         }
+        onNavigateBack()
     }
+
+    // Handle system back button
+    BackHandler(onBack = handleBack)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -96,7 +88,7 @@ fun RecordingDetailScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = handleBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
@@ -133,24 +125,57 @@ fun RecordingDetailScreen(
             )
         },
         floatingActionButton = {
-            if (!uiState.isRecording) {
-                FloatingActionButton(
-                    onClick = onResumeRecording,
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Resume Recording",
-                        tint = MaterialTheme.colorScheme.onPrimary
+            when {
+                uiState.isInitializing || uiState.isStartingRecording -> {
+                    // Show loading indicator while initializing or starting
+                    FloatingActionButton(
+                        onClick = { },
+                        modifier = Modifier.size(80.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = CircleShape
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 3.dp
+                        )
+                    }
+                }
+                uiState.isRecording -> {
+                    RecordButton(
+                        onClick = { viewModel.stopRecording() }
                     )
                 }
-            } else {
-                RecordButton(
-                    isRecording = true,
-                    isEnabled = true,
-                    onClick = { viewModel.stopRecording() }
-                )
+                uiState.isProcessing -> {
+                    // Show processing indicator after stopping but still processing
+                    FloatingActionButton(
+                        onClick = { },
+                        modifier = Modifier.size(80.dp),
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        shape = CircleShape
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            color = MaterialTheme.colorScheme.onTertiary,
+                            strokeWidth = 3.dp
+                        )
+                    }
+                }
+                else -> {
+                    FloatingActionButton(
+                        onClick = { viewModel.resumeCurrentRecording() },
+                        modifier = Modifier.size(80.dp),
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Start Recording",
+                            modifier = Modifier.size(36.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
             }
         }
     ) { paddingValues ->
@@ -159,18 +184,25 @@ fun RecordingDetailScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Info bar
-            if (uiState.speakerCount > 0 || uiState.transcriptionHistory.isNotEmpty()) {
+            // Info bar - always show when recording, processing, or have segments
+            AnimatedVisibility(
+                visible = uiState.transcriptionHistory.isNotEmpty() || uiState.isRecording || uiState.isProcessing,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
                 InfoBar(
                     segmentCount = uiState.transcriptionHistory.size,
-                    speakerCount = uiState.speakerCount,
                     isRecording = uiState.isRecording,
-                    isDiarizing = uiState.isDiarizing
+                    isProcessing = uiState.isProcessing
                 )
             }
 
-            // Recording waveform when active
-            if (uiState.isRecording) {
+            // Recording waveform - only when actively recording
+            AnimatedVisibility(
+                visible = uiState.isRecording,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -183,10 +215,7 @@ fun RecordingDetailScreen(
                         barColor = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    RecordingStatus(
-                        isProcessing = uiState.isProcessing,
-                        duration = uiState.recordingDurationMs
-                    )
+                    RecordingStatus(duration = uiState.recordingDurationMs)
                 }
             }
 
@@ -197,6 +226,18 @@ fun RecordingDetailScreen(
                     modifier = Modifier.weight(1f)
                 )
             } else {
+                // Group segments into paragraphs for better readability
+                val paragraphs = remember(uiState.transcriptionHistory) {
+                    groupIntoParagraphs(uiState.transcriptionHistory.map { it.text })
+                }
+
+                // Update scroll target based on paragraph count
+                LaunchedEffect(paragraphs.size) {
+                    if (paragraphs.isNotEmpty()) {
+                        listState.animateScrollToItem(paragraphs.size - 1)
+                    }
+                }
+
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -206,39 +247,12 @@ fun RecordingDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     itemsIndexed(
-                        items = uiState.transcriptionHistory,
-                        key = { _, segment -> segment.timestamp }
-                    ) { index, segment ->
-                        TranscriptionSegmentItem(
-                            text = segment.text,
-                            speakerId = segment.speakerId,
-                            isNew = index == uiState.transcriptionHistory.size - 1 && uiState.isRecording
-                        )
-                    }
-                }
-            }
-
-            // Diarization indicator
-            if (uiState.isDiarizing) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Identifying speakers...",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        items = paragraphs,
+                        key = { index, _ -> index }
+                    ) { index, paragraphText ->
+                        TranscriptionParagraph(
+                            text = paragraphText,
+                            isLatest = index == paragraphs.size - 1 && uiState.isRecording
                         )
                     }
                 }
@@ -250,10 +264,20 @@ fun RecordingDetailScreen(
 @Composable
 private fun InfoBar(
     segmentCount: Int,
-    speakerCount: Int,
     isRecording: Boolean,
-    isDiarizing: Boolean
+    isProcessing: Boolean
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "processing")
+    val processingAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = EaseInOut),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "processingAlpha"
+    )
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -266,38 +290,59 @@ private fun InfoBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (segmentCount > 0) {
-                InfoChip(
-                    icon = Icons.Default.TextSnippet,
-                    text = "$segmentCount segments"
-                )
-            }
-
-            if (speakerCount > 0) {
-                InfoChip(
-                    icon = Icons.Default.People,
-                    text = "$speakerCount speaker${if (speakerCount > 1) "s" else ""}",
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Notes,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "$segmentCount segments",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (isRecording) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(Color.Red, CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "REC",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Red,
-                        fontWeight = FontWeight.Bold
-                    )
+            AnimatedVisibility(
+                visible = isRecording || isProcessing,
+                enter = fadeIn() + expandHorizontally(),
+                exit = fadeOut() + shrinkHorizontally()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isRecording) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color.Red, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "REC",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Red,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else if (isProcessing) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .alpha(processingAlpha)
+                                .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "PROCESSING",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.alpha(processingAlpha)
+                        )
+                    }
                 }
             }
         }
@@ -305,34 +350,7 @@ private fun InfoBar(
 }
 
 @Composable
-private fun InfoChip(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String,
-    color: Color = MaterialTheme.colorScheme.onSurfaceVariant
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(14.dp),
-            tint = color
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = color
-        )
-    }
-}
-
-@Composable
-private fun RecordingStatus(
-    isProcessing: Boolean,
-    duration: Long
-) {
+private fun RecordingStatus(duration: Long) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -340,14 +358,11 @@ private fun RecordingStatus(
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .background(
-                    if (isProcessing) MaterialTheme.colorScheme.tertiary else Color.Red,
-                    CircleShape
-                )
+                .background(Color.Red, CircleShape)
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = if (isProcessing) "Processing..." else formatDuration(duration),
+            text = formatDuration(duration),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -373,20 +388,13 @@ private fun EmptyDetailState(
 }
 
 @Composable
-private fun TranscriptionSegmentItem(
+private fun TranscriptionParagraph(
     text: String,
-    speakerId: Int,
-    isNew: Boolean
+    isLatest: Boolean
 ) {
-    val speakerColor = if (speakerId >= 0) {
-        SpeakerColors[speakerId % SpeakerColors.size]
-    } else {
-        null
-    }
-
     AnimatedVisibility(
         visible = true,
-        enter = if (isNew) fadeIn() + slideInVertically { it / 2 } else fadeIn()
+        enter = if (isLatest) fadeIn() + slideInVertically { it / 2 } else fadeIn()
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -396,62 +404,94 @@ private fun TranscriptionSegmentItem(
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                // Speaker indicator
-                if (speakerColor != null) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 4.dp, end = 12.dp)
-                            .size(8.dp)
-                            .background(speakerColor, CircleShape)
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    if (speakerId >= 0) {
-                        Text(
-                            text = "Speaker ${speakerId + 1}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = speakerColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-
-                    Text(
-                        text = text,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            lineHeight = 24.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    lineHeight = 28.sp,
+                    letterSpacing = 0.15.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(16.dp)
+            )
         }
     }
 }
 
+/**
+ * Groups transcription segments into paragraphs for better readability.
+ * Creates a new paragraph every ~4 sentences or at natural topic breaks.
+ */
+private fun groupIntoParagraphs(segments: List<String>, maxSentencesPerParagraph: Int = 4): List<String> {
+    if (segments.isEmpty()) return emptyList()
+    if (segments.size == 1) return segments
+
+    val paragraphStarters = listOf(
+        "Erstens", "Zweitens", "Drittens", "Viertens",
+        "Zunächst", "Dann", "Danach", "Schließlich", "Abschließend",
+        "Außerdem", "Darüber hinaus", "Des Weiteren", "Ferner",
+        "Jedoch", "Allerdings", "Dennoch", "Trotzdem",
+        "Also", "Zusammenfassend", "Insgesamt", "Letztendlich",
+        "Einerseits", "Andererseits",
+        "Zum einen", "Zum anderen",
+        "Im Gegensatz", "Im Vergleich",
+        "Beispielsweise", "Zum Beispiel",
+        "Das bedeutet", "Das heißt",
+        "Wichtig ist", "Interessant ist", "Bemerkenswert ist"
+    )
+
+    val sentenceEndPattern = Regex("""[.!?]+\s*""")
+    val paragraphs = mutableListOf<StringBuilder>()
+    var currentParagraph = StringBuilder()
+    var sentenceCount = 0
+
+    for (segment in segments) {
+        val startsNewParagraph = paragraphStarters.any {
+            segment.startsWith(it, ignoreCase = true)
+        }
+
+        if (startsNewParagraph && currentParagraph.isNotEmpty()) {
+            paragraphs.add(currentParagraph)
+            currentParagraph = StringBuilder()
+            sentenceCount = 0
+        }
+
+        if (currentParagraph.isNotEmpty()) {
+            currentParagraph.append(" ")
+        }
+        currentParagraph.append(segment)
+
+        // Count sentences in this segment
+        sentenceCount += sentenceEndPattern.findAll(segment).count().coerceAtLeast(1)
+
+        // Start new paragraph after max sentences
+        if (sentenceCount >= maxSentencesPerParagraph) {
+            paragraphs.add(currentParagraph)
+            currentParagraph = StringBuilder()
+            sentenceCount = 0
+        }
+    }
+
+    if (currentParagraph.isNotEmpty()) {
+        paragraphs.add(currentParagraph)
+    }
+
+    return paragraphs.map { it.toString().trim() }
+}
+
 @Composable
 private fun RecordButton(
-    isRecording: Boolean,
-    isEnabled: Boolean,
     onClick: () -> Unit
 ) {
     FloatingActionButton(
         onClick = onClick,
-        modifier = Modifier.size(72.dp),
+        modifier = Modifier.size(80.dp),
         containerColor = MaterialTheme.colorScheme.error,
         shape = CircleShape
     ) {
         Icon(
             imageVector = Icons.Default.Stop,
             contentDescription = "Stop recording",
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(36.dp),
             tint = MaterialTheme.colorScheme.onError
         )
     }
