@@ -53,14 +53,14 @@ fun SettingsScreen(
         ) {
             // Post-processing setting
             SettingsSwitch(
-                title = "Text Post-Processing",
-                description = "Clean up transcription output. Disable if you experience issues with text corruption.",
+                title = "German Text Processing",
+                description = "Apply German-specific improvements: sentence capitalization, punctuation cleanup, and noise filtering. Basic cleanup (removing [MUSIK] tokens) is always active.",
                 checked = postProcessingEnabled,
                 onCheckedChange = { settingsManager.setPostProcessingEnabled(it) }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
- 
+
         }
     }
 }

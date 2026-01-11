@@ -1,23 +1,20 @@
 package de.cs.transkribio
 
 /**
- * German text post-processor for improving transcription quality.
+ * Text post-processor for improving transcription quality.
+ *
+ * Two levels of processing:
+ * 1. GENERAL (always on): Remove bracket tokens, basic cleanup
+ * 2. GERMAN (optional): Language-specific improvements
  *
  * CONSERVATIVE APPROACH: Only make changes that are safe and unlikely to corrupt text.
  * It's better to leave imperfect text than to introduce errors.
- *
- * Safe operations:
- * - Remove Whisper special tokens ([MUSIK], [APPLAUS], etc.)
- * - Clean up whitespace
- * - Basic punctuation fixes
- * - Capitalize first letter of sentences
- *
- * Disabled/removed risky operations:
- * - Word corrections (too many false positives)
- * - Noun capitalization (German is complex)
- * - Abbreviation expansions (context-dependent)
  */
 object GermanTextProcessor {
+
+    // Pattern to match any bracket token (complete or incomplete)
+    // Matches: [MUSIK], [MOTOR, [anything...
+    private val BRACKET_TOKEN_PATTERN = Regex("""\[[A-Z_]*\]?""", RegexOption.IGNORE_CASE)
 
     // Whisper special tokens to remove entirely
     private val SPECIAL_TOKENS = listOf(
@@ -61,8 +58,31 @@ object GermanTextProcessor {
     )
 
     /**
-     * Process a single transcription segment.
+     * GENERAL cleanup - ALWAYS runs, regardless of settings.
+     * Removes all bracket tokens (complete or incomplete like [MOTOR, [MUSIK], etc.)
+     * and cleans up whitespace.
+     */
+    fun generalCleanup(text: String): String {
+        if (text.isBlank()) return ""
+
+        var result = text
+
+        // Remove ALL bracket tokens (complete or incomplete)
+        result = BRACKET_TOKEN_PATTERN.replace(result, "")
+
+        // Remove music symbols
+        result = result.replace("♪", "").replace("♫", "").replace("🎵", "").replace("🎶", "")
+
+        // Clean up whitespace
+        result = result.replace(Regex("""\s+"""), " ").trim()
+
+        return result
+    }
+
+    /**
+     * Process a single transcription segment with German-specific improvements.
      * Returns cleaned text with minimal, safe corrections.
+     * NOTE: generalCleanup() should be called first.
      */
     fun processSegment(text: String): String {
         if (text.isBlank()) return ""

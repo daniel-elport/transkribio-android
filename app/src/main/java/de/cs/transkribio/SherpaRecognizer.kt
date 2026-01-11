@@ -183,25 +183,32 @@ object SherpaRecognizer {
             val rawText = result.text.trim()
             if (rawText.isEmpty()) return ""
 
-            // Check if post-processing is enabled
-            val postProcessingEnabled = TranskribioApp.instance.settingsManager.postProcessingEnabled.value
+            // ALWAYS apply general cleanup (removes bracket tokens like [MOTOR, [MUSIK], etc.)
+            var processedText = GermanTextProcessor.generalCleanup(rawText)
+            if (processedText.isEmpty()) {
+                Log.d(TAG, "Filtered (general cleanup): $rawText")
+                return ""
+            }
 
-            if (postProcessingEnabled) {
+            // Check if German post-processing is enabled
+            val germanPostProcessingEnabled = TranskribioApp.instance.settingsManager.postProcessingEnabled.value
+
+            if (germanPostProcessingEnabled) {
                 // Check if it's likely noise/false positive
-                if (GermanTextProcessor.isNoise(rawText)) {
+                if (GermanTextProcessor.isNoise(processedText)) {
                     Log.d(TAG, "Filtered noise: $rawText")
                     return ""
                 }
 
                 // Apply German text post-processing
-                val processedText = GermanTextProcessor.processSegment(rawText)
+                processedText = GermanTextProcessor.processSegment(processedText)
                 if (processedText.isNotEmpty()) {
                     Log.d(TAG, "Transcribed: $rawText -> $processedText")
                 }
                 return processedText
             } else {
-                Log.d(TAG, "Transcribed (raw): $rawText")
-                return rawText
+                Log.d(TAG, "Transcribed: $rawText -> $processedText")
+                return processedText
             }
         }
     }
