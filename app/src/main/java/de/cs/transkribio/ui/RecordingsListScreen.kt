@@ -219,26 +219,12 @@ private fun RecordingCard(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Duration
-                    Text(
-                        text = formatDuration(recording.durationMs),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    // Segments count
-                    if (recording.segments.isNotEmpty()) {
-                        Text(
-                            text = "${recording.segments.size} segments",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                // Duration
+                Text(
+                    text = formatDuration(recording.durationMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(4.dp))
 

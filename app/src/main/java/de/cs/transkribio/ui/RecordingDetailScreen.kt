@@ -184,14 +184,13 @@ fun RecordingDetailScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Info bar - always show when recording, processing, or have segments
+            // Info bar - show when recording or processing
             AnimatedVisibility(
-                visible = uiState.transcriptionHistory.isNotEmpty() || uiState.isRecording || uiState.isProcessing,
+                visible = uiState.isRecording || uiState.isProcessing,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
                 InfoBar(
-                    segmentCount = uiState.transcriptionHistory.size,
                     isRecording = uiState.isRecording,
                     isProcessing = uiState.isProcessing
                 )
@@ -215,13 +214,14 @@ fun RecordingDetailScreen(
                         barColor = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    RecordingStatus(duration = uiState.recordingDurationMs)
+                    RecordingStatus(isProcessing = uiState.isProcessing, duration = uiState.recordingDurationMs)
                 }
             }
 
             // Transcription content
             if (uiState.transcriptionHistory.isEmpty()) {
                 EmptyDetailState(
+                    isProcessing = uiState.isProcessing,
                     isRecording = uiState.isRecording,
                     modifier = Modifier.weight(1f)
                 )
@@ -263,7 +263,6 @@ fun RecordingDetailScreen(
 
 @Composable
 private fun InfoBar(
-    segmentCount: Int,
     isRecording: Boolean,
     isProcessing: Boolean
 ) {
@@ -286,71 +285,47 @@ private fun InfoBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (segmentCount > 0) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Notes,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "$segmentCount segments",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            AnimatedVisibility(
-                visible = isRecording || isProcessing,
-                enter = fadeIn() + expandHorizontally(),
-                exit = fadeOut() + shrinkHorizontally()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isRecording) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color.Red, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "REC",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Red,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else if (isProcessing) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .alpha(processingAlpha)
-                                .background(MaterialTheme.colorScheme.tertiary, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "PROCESSING",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.alpha(processingAlpha)
-                        )
-                    }
-                }
+            if (isRecording) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(Color.Red, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "REC",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold
+                )
+            } else if (isProcessing) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .alpha(processingAlpha)
+                        .background(MaterialTheme.colorScheme.tertiary, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "PROCESSING",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.alpha(processingAlpha)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun RecordingStatus(duration: Long) {
+private fun RecordingStatus(
+    isProcessing: Boolean,
+    duration: Long
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -358,11 +333,14 @@ private fun RecordingStatus(duration: Long) {
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .background(Color.Red, CircleShape)
+                .background(
+                    if (isProcessing) MaterialTheme.colorScheme.tertiary else Color.Red,
+                    CircleShape
+                )
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = formatDuration(duration),
+            text = if (isProcessing) "Processing..." else formatDuration(duration),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -371,6 +349,7 @@ private fun RecordingStatus(duration: Long) {
 
 @Composable
 private fun EmptyDetailState(
+    isProcessing: Boolean,
     isRecording: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -379,7 +358,7 @@ private fun EmptyDetailState(
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = if (isRecording) "Listening..." else "Tap the microphone to continue recording",
+            text = if(isProcessing) "" else if (isRecording) "Listening..." else "Tap the microphone to continue recording",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Light

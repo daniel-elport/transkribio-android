@@ -53,8 +53,8 @@ fun SettingsScreen(
         ) {
             // Post-processing setting
             SettingsSwitch(
-                title = "German Text Processing",
-                description = "Apply German-specific improvements: sentence capitalization, punctuation cleanup, and noise filtering. Basic cleanup (removing [MUSIK] tokens) is always active.",
+                title = "Text Post Processing",
+                description = "Apply German-specific improvements.",
                 checked = postProcessingEnabled,
                 onCheckedChange = { settingsManager.setPostProcessingEnabled(it) }
             )

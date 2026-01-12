@@ -20,10 +20,13 @@ import kotlin.concurrent.withLock
 object SherpaRecognizer {
     private const val TAG = "SherpaRecognizer"
     private const val SAMPLE_RATE = 16000
-
+    // NEW: Minimum audio duration to process (2.0s is a sweet spot for Whisper Small)
+    private const val MIN_BATCH_SECONDS = 2.0f
+    private const val MIN_BATCH_SAMPLES = (MIN_BATCH_SECONDS * SAMPLE_RATE).toInt()
     private var vad: Vad? = null
     private var recognizer: OfflineRecognizer? = null
-
+    // NEW: Buffer to hold short VAD segments
+    private var accumulatedSamples = FloatArray(0)
     private val isInitialized = AtomicBoolean(false)
     private val vadLock = ReentrantLock()
     private val recognizerLock = ReentrantLock()
@@ -75,16 +78,22 @@ object SherpaRecognizer {
         // Optimized VAD settings for faster response
         val sileroConfig = SileroVadModelConfig(
             model = "$modelDir/silero_vad.onnx",
-            threshold = 0.35f,           // More sensitive (was 0.4)
-            minSilenceDuration = 0.15f,  // Much faster splits (was 0.3)
-            minSpeechDuration = 0.08f,   // Catch very short utterances (was 0.1)
+            // 0.35f is okay, but 0.5f is often safer to avoid background noise triggering the decoder
+            threshold = 0.4f,
+
+            // 0.15f is very aggressive. 0.25f - 0.3f is safer for German to keep phrases together.
+            minSilenceDuration = 0.25f,
+
+            // 0.08f is too short (less than 100ms). 0.25f ensures you have actual speech content.
+            minSpeechDuration = 0.25f,
+
             windowSize = 512
         )
 
         val vadConfig = VadModelConfig(
             sileroVadModelConfig = sileroConfig,
             sampleRate = SAMPLE_RATE,
-            numThreads = 2,
+            numThreads = 1, // VAD is light; 1 thread is usually enough and saves CPU
             debug = false
         )
 
@@ -104,7 +113,9 @@ object SherpaRecognizer {
         val modelConfig = OfflineModelConfig(
             whisper = whisperConfig,
             tokens = "$modelDir/small-tokens.txt",
-            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6),
+            // Cap threads to avoid thermal throttling on Android.
+            // 4 is usually the sweet spot for small models.
+            numThreads = 4,
             debug = false,
             modelType = "whisper"
         )
@@ -138,36 +149,106 @@ object SherpaRecognizer {
     }
 
     /**
-     * Process pending VAD segments and return transcribed text.
-     * This is the heavy operation that does Whisper inference.
+     * Optimized: Accumulates segments until we reach MIN_BATCH_SAMPLES.
+     * This prevents Whisper from processing tiny 0.2s clips which cause hallucinations.
      */
     fun processSegments(): List<String> {
         if (!isInitialized.get()) return emptyList()
 
-        val results = mutableListOf<String>()
+        var samplesToProcess: FloatArray? = null
 
+        // 1. Critical Section: Extract from VAD and manage Buffer
         vadLock.withLock {
             val v = vad ?: return emptyList()
 
-            while (!v.empty()) {
-                val segment = v.front()
-                val segmentSamples = segment.samples
-                v.pop()
+            // If VAD has new segments, pop them all and append to our buffer
+            if (!v.empty()) {
+                val newSegments = mutableListOf<FloatArray>()
+                var totalNewSamples = 0
 
-                // Release VAD lock during heavy inference
-                vadLock.unlock()
-                try {
-                    val text = transcribeSegment(segmentSamples)
-                    if (text.isNotEmpty()) {
-                        results.add(text)
-                    }
-                } finally {
-                    vadLock.lock()
+                while (!v.empty()) {
+                    val segment = v.front()
+                    newSegments.add(segment.samples)
+                    totalNewSamples += segment.samples.size
+                    v.pop()
                 }
+
+                // Efficiently combine old buffer + new segments
+                accumulatedSamples = mergeArrays(accumulatedSamples, newSegments, totalNewSamples)
+            }
+
+            // 2. Check if buffer is big enough to be worth transcribing
+            if (accumulatedSamples.size >= MIN_BATCH_SAMPLES) {
+                samplesToProcess = accumulatedSamples
+                accumulatedSamples = FloatArray(0) // Clear buffer
             }
         }
 
-        return results
+        // 3. Heavy Lifting (Outside Lock)
+        // Only run inference if we grabbed a batch
+        if (samplesToProcess != null) {
+            val text = transcribeSegment(samplesToProcess!!)
+            if (text.isNotEmpty()) {
+                return listOf(text)
+            }
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * Forces processing of any remaining audio in the buffer (e.g., end of recording).
+     */
+    fun flush(): String? {
+        if (!isInitialized.get()) return null
+
+        var samplesToProcess: FloatArray? = null
+
+        vadLock.withLock {
+            val v = vad ?: return null
+            v.flush() // Tell VAD no more audio is coming
+
+            // Collect any final bits from VAD
+            val newSegments = mutableListOf<FloatArray>()
+            var totalNewSamples = 0
+            while (!v.empty()) {
+                val segment = v.front()
+                newSegments.add(segment.samples)
+                totalNewSamples += segment.samples.size
+                v.pop()
+            }
+
+            // Combine with whatever was buffering
+            val finalBatch = mergeArrays(accumulatedSamples, newSegments, totalNewSamples)
+            accumulatedSamples = FloatArray(0) // Reset
+
+            if (finalBatch.isNotEmpty()) {
+                samplesToProcess = finalBatch
+            }
+        }
+
+        if (samplesToProcess != null) {
+            return transcribeSegment(samplesToProcess!!)
+        }
+
+        return null
+    }
+
+    // Helper to merge arrays without creating too many intermediate objects
+    private fun mergeArrays(current: FloatArray, newSegments: List<FloatArray>, newSize: Int): FloatArray {
+        if (newSegments.isEmpty()) return current
+
+        val result = FloatArray(current.size + newSize)
+        // Copy existing buffer
+        System.arraycopy(current, 0, result, 0, current.size)
+
+        // Append new segments
+        var offset = current.size
+        for (seg in newSegments) {
+            System.arraycopy(seg, 0, result, offset, seg.size)
+            offset += seg.size
+        }
+        return result
     }
 
     private fun transcribeSegment(samples: FloatArray): String {
@@ -227,16 +308,7 @@ object SherpaRecognizer {
         return results.firstOrNull()
     }
 
-    fun flush(): String? {
-        if (!isInitialized.get()) return null
 
-        vadLock.withLock {
-            vad?.flush()
-        }
-
-        val results = processSegments()
-        return if (results.isNotEmpty()) results.joinToString(" ") else null
-    }
 
     fun hasPendingSegments(): Boolean {
         if (!isInitialized.get()) return false
@@ -248,6 +320,7 @@ object SherpaRecognizer {
     fun reset() {
         vadLock.withLock {
             vad?.clear()
+            accumulatedSamples = FloatArray(0) // Clear our custom buffer too
         }
     }
 
