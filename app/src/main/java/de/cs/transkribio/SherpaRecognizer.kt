@@ -20,13 +20,18 @@ import kotlin.concurrent.withLock
 object SherpaRecognizer {
     private const val TAG = "SherpaRecognizer"
     private const val SAMPLE_RATE = 16000
-    // NEW: Minimum audio duration to process (2.0s is a sweet spot for Whisper Small)
+    // Minimum audio duration to process (2.0s is a sweet spot for Whisper Small)
     private const val MIN_BATCH_SECONDS = 2.0f
     private const val MIN_BATCH_SAMPLES = (MIN_BATCH_SECONDS * SAMPLE_RATE).toInt()
+    // Maximum time before forcing transcription (for continuous speech without pauses)
+    private const val MAX_BATCH_SECONDS = 10.0f
+    private const val MAX_BATCH_SAMPLES = (MAX_BATCH_SECONDS * SAMPLE_RATE).toInt()
     private var vad: Vad? = null
     private var recognizer: OfflineRecognizer? = null
-    // NEW: Buffer to hold short VAD segments
+    // Buffer to hold short VAD segments
     private var accumulatedSamples = FloatArray(0)
+    // Track total audio fed since last transcription (for timeout fallback)
+    private var samplesSinceLastTranscription = 0
     private val isInitialized = AtomicBoolean(false)
     private val vadLock = ReentrantLock()
     private val recognizerLock = ReentrantLock()
@@ -137,19 +142,30 @@ object SherpaRecognizer {
 
     /**
      * Feed audio samples to VAD. Non-blocking for VAD part.
-     * Returns true if there are segments ready for transcription.
+     * Returns true if there are segments ready for transcription (VAD triggered or timeout reached).
      */
     fun feedAudio(samples: FloatArray): Boolean {
         if (!isInitialized.get()) return false
 
         vadLock.withLock {
             vad?.acceptWaveform(samples)
-            return vad?.empty() == false
+            samplesSinceLastTranscription += samples.size
+
+            // Trigger processing if VAD has segments OR if we've accumulated enough audio (timeout fallback)
+            val vadReady = vad?.empty() == false
+            val timeoutReached = samplesSinceLastTranscription >= MAX_BATCH_SAMPLES
+
+            if (timeoutReached && !vadReady) {
+                Log.d(TAG, "Timeout fallback triggered after ${samplesSinceLastTranscription / SAMPLE_RATE}s")
+            }
+
+            return vadReady || timeoutReached
         }
     }
 
     /**
      * Optimized: Accumulates segments until we reach MIN_BATCH_SAMPLES.
+     * Also handles timeout fallback for continuous speech without pauses.
      * This prevents Whisper from processing tiny 0.2s clips which cause hallucinations.
      */
     fun processSegments(): List<String> {
@@ -160,6 +176,8 @@ object SherpaRecognizer {
         // 1. Critical Section: Extract from VAD and manage Buffer
         vadLock.withLock {
             val v = vad ?: return emptyList()
+
+            val timeoutReached = samplesSinceLastTranscription >= MAX_BATCH_SAMPLES
 
             // If VAD has new segments, pop them all and append to our buffer
             if (!v.empty()) {
@@ -175,12 +193,30 @@ object SherpaRecognizer {
 
                 // Efficiently combine old buffer + new segments
                 accumulatedSamples = mergeArrays(accumulatedSamples, newSegments, totalNewSamples)
+            } else if (timeoutReached) {
+                // Timeout fallback: force VAD to flush current audio even without silence detection
+                v.flush()
+                val newSegments = mutableListOf<FloatArray>()
+                var totalNewSamples = 0
+
+                while (!v.empty()) {
+                    val segment = v.front()
+                    newSegments.add(segment.samples)
+                    totalNewSamples += segment.samples.size
+                    v.pop()
+                }
+
+                if (totalNewSamples > 0) {
+                    accumulatedSamples = mergeArrays(accumulatedSamples, newSegments, totalNewSamples)
+                    Log.d(TAG, "Timeout: flushed ${totalNewSamples / SAMPLE_RATE}s from VAD")
+                }
             }
 
             // 2. Check if buffer is big enough to be worth transcribing
             if (accumulatedSamples.size >= MIN_BATCH_SAMPLES) {
                 samplesToProcess = accumulatedSamples
                 accumulatedSamples = FloatArray(0) // Clear buffer
+                samplesSinceLastTranscription = 0 // Reset timeout counter
             }
         }
 
@@ -221,6 +257,7 @@ object SherpaRecognizer {
             // Combine with whatever was buffering
             val finalBatch = mergeArrays(accumulatedSamples, newSegments, totalNewSamples)
             accumulatedSamples = FloatArray(0) // Reset
+            samplesSinceLastTranscription = 0 // Reset timeout counter
 
             if (finalBatch.isNotEmpty()) {
                 samplesToProcess = finalBatch
@@ -321,6 +358,7 @@ object SherpaRecognizer {
         vadLock.withLock {
             vad?.clear()
             accumulatedSamples = FloatArray(0) // Clear our custom buffer too
+            samplesSinceLastTranscription = 0 // Reset timeout counter
         }
     }
 
